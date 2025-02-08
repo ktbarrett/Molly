@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from ast import literal_eval
+from collections import deque
+from enum import Enum, auto
 
 import molly.ast as ast
-from molly.source import SourceIterator, TextIOSourceIterator
+from molly.source import SourceIterator, _TextIOSourceIterator
 
 
 def str_range(start: str, end: str) -> set[str]:
@@ -33,27 +35,33 @@ _hexchars = _numbers | set("ABCDEF")
 
 
 class Lexer:
+    class _State(Enum):
+        START = auto()
+        RUNNING = auto()
+        FINISHED = auto()
+
     def __init__(self, src: SourceIterator) -> None:
         self._src = src
-        self._lookahead: ast.Token | None = None
+        self._lookahead = deque[ast.Token]()
+        self._paren_depth: int = 0
+        self._indentation: list[list[int]] = []
+        self._state: Lexer._State = Lexer._State.START
 
-    def peek(self) -> ast.Token:
-        if self._lookahead is None:
+    def curr(self) -> ast.Token:
+        if not self._lookahead:
             self._next()
-        assert self._lookahead is not None
-        return self._lookahead
+        return self._lookahead[0]
 
-    def next(self) -> ast.Token:
-        res, self._lookahead = self.peek(), None
-        return res
-
-    def _emit(self, token: ast.Token) -> None:
-        assert self._lookahead is None
-        self._lookahead = token
+    def next(self) -> None:
+        self._lookahead.popleft()
 
     def _next(self) -> None:
+        if self._state == self._State.START:
+            self._enter_new_indentation_context()
+            self._state = self._State.RUNNING
+        assert self._state != self._State.FINISHED
         while True:
-            match self._src.peek():
+            match self._src.curr():
                 case " ":
                     self._src.next()
                     continue
@@ -62,15 +70,58 @@ class Lexer:
                     continue
                 case "\n":
                     self._src.next()
-                    continue  # TODO
+
+                    # Inside parens newlines are just whitespace
+                    if self._paren_depth > 0:
+                        continue
+
+                    self._run_to_next_code()
+                    if self._src.curr() == "\0":
+                        continue
+
+                    # determine INDENT, DEDENT, NODENT
+                    curr_indentation_scope = self._indentation[-1]
+                    if self._src.charno == curr_indentation_scope[-1]:
+                        return self._emit_here(ast.Nodent)
+                    elif self._src.charno > curr_indentation_scope[-1]:
+                        curr_indentation_scope.append(self._src.charno)
+                        return self._emit_here(ast.Indent)
+                    else:
+                        while self._src.charno < curr_indentation_scope[-1]:
+                            curr_indentation_scope.pop()
+                            self._emit_here(ast.Dedent)
+                        return
                 case "(":
-                    return self._emit_delim(ast.LParen)
+                    self._paren_depth += 1
+                    self._emit_here(ast.LParen)
+                    return self._src.next()
                 case ")":
-                    return self._emit_delim(ast.RParen)
+                    self._paren_depth -= 1
+                    if self._paren_depth < 0:
+                        raise ast.ParseError(
+                            self._src.name,
+                            self._src.lineno,
+                            self._src.charno,
+                            "Unmatched ')'",
+                        )
+                    self._emit_here(ast.RParen)
+                    return self._src.next()
                 case "{":
-                    return self._emit_delim(ast.LCurly)
+                    self._emit_here(ast.LCurly)
+                    self._src.next()
+                    self._enter_new_indentation_context()
+                    return
                 case "}":
-                    return self._emit_delim(ast.RCurly)
+                    if len(self._indentation) == 1:
+                        raise ast.ParseError(
+                            self._src.name,
+                            self._src.lineno,
+                            self._src.charno,
+                            "Unmatched '}'",
+                        )
+                    self._indentation.pop()
+                    self._emit_here(ast.RCurly)
+                    return self._src.next()
                 case c if c in _number_start_chars:
                     return self._lex_number()
                 case '"':
@@ -78,30 +129,67 @@ class Lexer:
                 case c if c in _name_start_chars:
                     return self._lex_name()
                 case "\0":
-                    return self._emit_delim(ast.EOF)
+                    if self._paren_depth:
+                        raise ast.ParseError(
+                            self._src.name,
+                            self._src.lineno,
+                            self._src.charno,
+                            "Unterminated '( )' list",
+                        )
+                    if len(self._indentation) > 1:
+                        raise ast.ParseError(
+                            self._src.name,
+                            self._src.lineno,
+                            self._src.charno,
+                            "Unterminated '{ }' list",
+                        )
+                    # emit any remaining Dedents and EOF
+                    curr_indentation_scope = self._indentation[-1]
+                    while len(curr_indentation_scope) > 1:
+                        curr_indentation_scope.pop()
+                        self._emit_here(ast.Dedent)
+                    self._emit_here(ast.EOF)
+                    self._state = self._State.FINISHED
+                    return
                 case ".":
                     raise ast.ParseError(
-                        self._src.filename,
+                        self._src.name,
                         self._src.lineno,
                         self._src.charno,
                         "Names can't start with '.' and Numbers must start with '-' or a digit.",
                     )
                 case c:
-                    breakpoint()
                     raise ast.ParseError(
-                        self._src.filename,
+                        self._src.name,
                         self._src.lineno,
                         self._src.charno,
                         f"Source contained non-printable character: '{c}'",
                     )
 
+    def _run_to_next_code(self) -> None:
+        while True:
+            while self._src.curr() in " \n":
+                self._src.next()
+            if self._src.curr() == "#":
+                self._ignore_comment()
+            else:
+                break
+
+    def _enter_new_indentation_context(self) -> None:
+        self._run_to_next_code()
+        if self._src.curr() == "\0":
+            return
+        self._indentation.append([self._src.charno])
+
     def _ignore_comment(self) -> None:
-        while self._src.peek() not in "\n\0":
+        while self._src.curr() not in "\n\0":
             self._src.next()
 
-    def _emit_delim(self, token_cls: type[ast.Token]) -> None:
-        token = token_cls(self._src.filename, self._src.lineno, self._src.charno)
-        self._src.next()
+    def _emit(self, token: ast.Token) -> None:
+        self._lookahead.append(token)
+
+    def _emit_here(self, token_cls: type[ast.Token]) -> None:
+        token = token_cls(self._src.name, self._src.lineno, self._src.charno)
         self._emit(token)
 
     def _lex_number(self) -> None:
@@ -109,124 +197,131 @@ class Lexer:
         capture: list[str] = []
 
         # optional starting '-'
-        if self._src.peek() == "-":
-            capture.append(self._src.next())
+        if (c := self._src.curr()) == "-":
+            capture.append(c)
+            self._src.next()
 
         # at least 1 number
-        if self._src.peek() not in _numbers:
+        if (c := self._src.curr()) not in _numbers:
             raise ast.ParseError(
-                self._src.filename,
+                self._src.name,
                 self._src.lineno,
                 start_charno,
                 "Invalid number literal. At least one number required in integer part.",
             )
-        capture.append(self._src.next())
+        capture.append(c)
+        self._src.next()
 
         # as many numbers as you want
-        while self._src.peek() in _numbers:
-            capture.append(self._src.next())
+        while (c := self._src.curr()) in _numbers:
+            capture.append(c)
+            self._src.next()
 
         is_float: bool = False
 
         # optional fraction
-        if self._src.peek() == ".":
+        if (c := self._src.curr()) == ".":
             is_float = True
-            capture.append(self._src.next())
+            capture.append(c)
+            self._src.next()
 
             # at least 1 number
-            if self._src.peek() not in _numbers:
+            if (c := self._src.curr()) not in _numbers:
                 raise ast.ParseError(
-                    self._src.filename,
+                    self._src.name,
                     self._src.lineno,
                     start_charno,
                     "Invalid number literal. At least one number required in fractional part.",
                 )
-            capture.append(self._src.next())
+            capture.append(c)
+            self._src.next()
 
             # as many numbers as you want
-            while self._src.peek() in _numbers:
-                capture.append(self._src.next())
+            while (c := self._src.curr()) in _numbers:
+                capture.append(c)
+                self._src.next()
 
         # optional exponent
-        if self._src.peek() == "e":
+        if (c := self._src.curr()) == "e":
             is_float = True
-            capture.append(self._src.next())
+            capture.append(c)
+            self._src.next()
 
             # optional starting '-'
-            if self._src.peek() == "-":
-                capture.append(self._src.next())
+            if (c := self._src.curr()) == "-":
+                capture.append(c)
+                self._src.next()
 
             # at least 1 number
-            if self._src.peek() not in _numbers:
+            if (c := self._src.curr()) not in _numbers:
                 raise ast.ParseError(
-                    self._src.filename,
+                    self._src.name,
                     self._src.lineno,
                     start_charno,
                     "Invalid number literal. At least one number required in fractional part.",
                 )
-            capture.append(self._src.next())
+            capture.append(c)
+            self._src.next()
 
             # as many numbers as you want
-            while self._src.peek() in _numbers:
-                capture.append(self._src.next())
+            while (c := self._src.curr()) in _numbers:
+                capture.append(c)
+                self._src.next()
 
         value = literal_eval("".join(capture))
         if is_float:
-            self._emit(
-                ast.Float(self._src.filename, self._src.lineno, start_charno, value)
-            )
+            self._emit(ast.Float(self._src.name, self._src.lineno, start_charno, value))
         else:
             self._emit(
-                ast.Integer(self._src.filename, self._src.lineno, start_charno, value)
+                ast.Integer(self._src.name, self._src.lineno, start_charno, value)
             )
 
     def _lex_string(self) -> None:
         start_charno = self._src.charno
         capture: list[str] = []
-        assert self._src.next() == '"'
+        self._src.next()
         while True:
-            match self._src.peek():
+            match self._src.curr():
                 case '"':
                     self._src.next()
                     value = "".join(capture)
                     return self._emit(
                         ast.String(
-                            self._src.filename, self._src.lineno, start_charno, value
+                            self._src.name, self._src.lineno, start_charno, value
                         )
                     )
                 case "\\":
                     escape_start_charno = self._src.charno
                     self._src.next()
-                    match self._src.peek():
-                        case "n":
-                            capture.append("\n")
-                            self._src.next()
-                        case "t":
-                            capture.append("\t")
-                            self._src.next()
-                        case "\\":
-                            capture.append("\\")
-                            self._src.next()
-                        case '"':
-                            capture.append('"')
+                    match self._src.curr():
+                        case c if c in 'nt\\"':
+                            escape_value_translator = {
+                                "n": "\n",
+                                "t": "\t",
+                                "\\": "\\",
+                                '"': '"',
+                            }
+                            escape_value = escape_value_translator[c]
+                            capture.append(escape_value)
                             self._src.next()
                         case "x":
                             self._src.next()
                             escape_capture: list[str] = []
                             for _ in range(2):
-                                if self._src.peek() not in _hexchars:
+                                if (c := self._src.curr()) not in _hexchars:
                                     raise ast.ParseError(
-                                        self._src.filename,
+                                        self._src.name,
                                         self._src.lineno,
                                         escape_start_charno,
                                         "Invalid escape sequence",
                                     )
-                                escape_capture.append(self._src.next())
+                                escape_capture.append(c)
+                                self._src.next()
                             escape_value = chr(int("".join(escape_capture), 16))
                             capture.append(escape_value)
                         case c:
                             raise ast.ParseError(
-                                self._src.filename,
+                                self._src.name,
                                 self._src.lineno,
                                 escape_start_charno,
                                 "Invalid escape sequence",
@@ -236,14 +331,14 @@ class Lexer:
                     self._src.next()
                 case "\0" | "\n":
                     raise ast.ParseError(
-                        self._src.filename,
+                        self._src.name,
                         self._src.lineno,
                         start_charno,
                         "Unterminated string literal",
                     )
                 case _:
                     raise ast.ParseError(
-                        self._src.filename,
+                        self._src.name,
                         self._src.lineno,
                         self._src.charno,
                         f"String contains non-printable character: '{c}'",
@@ -251,32 +346,43 @@ class Lexer:
 
     def _lex_name(self) -> None:
         start_charno = self._src.charno
-        capture: list[str] = [self._src.next()]
-        while self._src.peek() in _name_rest_chars:
-            capture.append(self._src.next())
+        capture: list[str] = []
+        while (c := self._src.curr()) in _name_rest_chars:
+            capture.append(c)
+            self._src.next()
         value = "".join(capture)
         match value:
             case "null":
-                self._emit(ast.Null(self._src.filename, self._src.lineno, start_charno))
+                self._emit(ast.Null(self._src.name, self._src.lineno, start_charno))
             case "true":
                 self._emit(
-                    ast.TrueToken(self._src.filename, self._src.lineno, start_charno)
+                    ast.TrueToken(self._src.name, self._src.lineno, start_charno)
                 )
             case "false":
                 self._emit(
-                    ast.FalseToken(self._src.filename, self._src.lineno, start_charno)
+                    ast.FalseToken(self._src.name, self._src.lineno, start_charno)
                 )
             case _:
                 self._emit(
-                    ast.Name(self._src.filename, self._src.lineno, start_charno, value)
+                    ast.Name(self._src.name, self._src.lineno, start_charno, value)
                 )
 
 
 if __name__ == "__main__":
     import sys
 
-    lexer = Lexer(TextIOSourceIterator("stdin", sys.stdin))
+    if len(sys.argv) == 1:
+        file = sys.stdin
+        name = "<stdin>"
+    elif len(sys.argv) == 2:
+        file = open(sys.argv[1])
+        name = sys.argv[1]
+    else:
+        raise ValueError("Too many arguments")
 
-    while type(token := lexer.peek()) is not ast.EOF:
+    lexer = Lexer(_TextIOSourceIterator(name, file))
+
+    while type(token := lexer.curr()) is not ast.EOF:
         print(token)
         lexer.next()
+    print(token)

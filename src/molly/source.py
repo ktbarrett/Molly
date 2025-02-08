@@ -5,26 +5,33 @@ from typing import TextIO
 
 
 class SourceIterator(ABC):
-    @property
-    @abstractmethod
-    def filename(self) -> str: ...
+    """Iterates over characters of the source file."""
 
     @property
     @abstractmethod
-    def lineno(self) -> int: ...
+    def name(self) -> str:
+        """Unique identifier of the source object."""
 
     @property
     @abstractmethod
-    def charno(self) -> int: ...
+    def lineno(self) -> int:
+        """The line number of the current character in the source object. Starts at 1."""
+
+    @property
+    @abstractmethod
+    def charno(self) -> int:
+        """The index into the line of the current character in the source object. Starts at 1."""
 
     @abstractmethod
-    def peek(self) -> str: ...
+    def curr(self) -> str:
+        """The value of the current character in the source object."""
 
     @abstractmethod
-    def next(self) -> str: ...
+    def next(self) -> None:
+        """Moves to the next character in the source object."""
 
 
-class TextIOSourceIterator(SourceIterator):
+class _TextIOSourceIterator(SourceIterator):
     def __init__(self, filename: str, io: TextIO) -> None:
         self._filename = filename
         self._io = io
@@ -33,7 +40,7 @@ class TextIOSourceIterator(SourceIterator):
         self._idx = 0
 
     @property
-    def filename(self) -> str:
+    def name(self) -> str:
         return self._filename
 
     @property
@@ -44,16 +51,18 @@ class TextIOSourceIterator(SourceIterator):
     def charno(self) -> int:
         return self._idx + 1
 
-    def peek(self) -> str:
-        if self._idx >= len(self._line):
+    def curr(self) -> str:
+        if not self._line:
             self._line = self._io.readline()
             if not self._line:
-                return "\x00"
+                return "\0"
             self._lineno += 1
             self._idx = 0
         return self._line[self._idx]
 
-    def next(self) -> str:
-        res = self.peek()
+    def next(self) -> None:
         self._idx += 1
-        return res
+        if self._idx >= len(self._line):
+            self._line = self._io.readline()
+            self._lineno += 1
+            self._idx = 0

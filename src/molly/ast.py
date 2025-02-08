@@ -48,7 +48,7 @@ class RCurly(Token): ...
 
 
 @dataclass
-class Newline(Token): ...
+class Nodent(Token): ...
 
 
 @dataclass
@@ -91,7 +91,7 @@ ListExprElem: TypeAlias = ListExpr | Atom
 @dataclass
 class SpaceLineExpr:
     exprs: list[Expr]
-    newline: Newline
+    newline: Nodent
 
 
 @dataclass
