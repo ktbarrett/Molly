@@ -1,0 +1,18 @@
+[project]
+name = "pymolly"
+version = "0.dev1"
+description = "Python implementation of Molly"
+authors = [
+    {name = "Kaleb Barrett", email = "dev.ktbarrett@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "mypy",
+    "ruff",
+    "pre-commit",
+]
