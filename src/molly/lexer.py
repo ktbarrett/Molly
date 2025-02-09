@@ -75,11 +75,25 @@ class Lexer:
                     if self._paren_depth > 0:
                         continue
 
+                    # Consume whitespace until code if found so we can set indentation
                     self._run_to_next_code()
                     if self._src.curr() == "\0":
                         continue
 
-                    # determine INDENT, DEDENT, NODENT
+                    # Handle closing curly bracket
+                    if self._src.curr() == "}":
+                        if len(self._indentation) == 1:
+                            raise ast.ParseError(
+                                self._src.name,
+                                self._src.lineno,
+                                self._src.charno,
+                                "Unmatched '}'",
+                            )
+                        self._indentation.pop()
+                        self._emit_here(ast.RCurly)
+                        return self._src.next()
+
+                    # Determine INDENT, DEDENT, NODENT.
                     curr_indentation_scope = self._indentation[-1]
                     if self._src.charno == curr_indentation_scope[-1]:
                         return self._emit_here(ast.Nodent)
