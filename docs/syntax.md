@@ -100,12 +100,6 @@ parenthesized lists, significant whitespace lists, and curly bracket lists.
 These all translated into `list` objects after parsing, so they are ultimately equivalent.
 Choose the one that is the most readable in any given situation.
 
-### Pattern
-```
-expr = paren_expr | ws_expr | curly_expr
-value = expr | atom
-```
-
 ## Parenthesized Lists
 
 These lists start with `(` and end with `)`.
@@ -163,16 +157,29 @@ If the next line increases the indentation, the list is *not* ended until a matc
 > a
 >    b c
 >    d e
->        f
->    g
-(a (b c) (d e (f)) (g))
+>        f g
+>    h i j
+(a (b c) (d e (f g)) (h i j))
 ```
+
+And if the line contains only one expression,
+instead of it being added to a list of it's own, it's treated literally.
+This allows users to split each element of a list onto different lines without requiring them to be evaluated as if they were a single element list.
+
+```
+> +
+>    1
+>    (+ 2 0)
+>    3
+(+ 1 (+ 2 0) 3)
 
 ### Pattern
 ```
-ws_expr = ws_line_list | ws_block_list
-ws_line_list = value+ newline
-ws_block_list = value+ indent value+ dedent
+non_ws_expr = block | paren_expr | atom
+ws_expr = ws_line_list | ws_block_list | ws_line_expr
+ws_line_expr = non_ws_expr nodent
+ws_line_list = non_ws_expr non_ws_expr+ nodent
+ws_block_list = non_ws_expr+ indent ws_expr+ dedent
 ```
 
 ## Curly Bracket Lists
@@ -207,7 +214,7 @@ giving them a new variable scope and expression sequencing.
 
 ### Pattern
 ```
-curly_expr = "{" value+ "}"
+curly_expr = "{" ws_expr+ "}"
 ```
 
 # Modules
@@ -226,5 +233,5 @@ if (> a 20) {
 
 ### Pattern
 ```
-module = expr*
+module = ws_expr*
 ```
