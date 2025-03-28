@@ -1,7 +1,7 @@
 [project]
-name = "pymolly"
+name = "molly"
 version = "0.dev1"
-description = "Python implementation of Molly"
+description = "Toy LISP in Python"
 authors = [
     {name = "Kaleb Barrett", email = "dev.ktbarrett@gmail.com"}
 ]
