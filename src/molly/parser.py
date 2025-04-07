@@ -11,90 +11,106 @@ class Parser:
         self._lexer = lexer
 
     def parse_program(self) -> ast.Program:
-        exprs: list[ast.Expr] = []
+        exprs: list[ast.WSExpr] = []
         while True:
-            match type(self._lexer.curr()):
-                case ast.EOF:
-                    break
+            match self._lexer.curr():
+                case ast.EOF():
+                    return ast.Program(exprs)
                 case _:
-                    expr = self.parse_expr()
+                    expr = self._parse_ws_expr()
                     exprs.append(expr)
 
-        return ast.Program(exprs)
+    def _parse_ws_expr(self) -> ast.WSExpr:
+        leading_exprs: list[ast.WSElemExpr] = []
+        while True:
+            match self._lexer.curr():
+                case ast.Newline() as newline:
+                    self._lexer.next()
+                    match self._lexer.curr():
+                        case ast.Indent() as indent:
+                            self._lexer.next()
+                            exprs: list[ast.WSExpr] = []
+                            while True:
+                                match self._lexer.curr():
+                                    case ast.Dedent() as dedent:
+                                        self._lexer.next()
+                                        return ast.WSBlock(
+                                            leading_exprs,
+                                            newline,
+                                            indent,
+                                            exprs,
+                                            dedent,
+                                        )
+                                    case _:
+                                        expr = self._parse_ws_expr()
+                                        exprs.append(expr)
+                        case _:
+                            if len(leading_exprs) == 1:
+                                return ast.WSSingle(leading_exprs[0], newline)
+                            else:
+                                return ast.WSList(leading_exprs, newline)
+                case _:
+                    leading_expr = self._parse_ws_elem()
+                    leading_exprs.append(leading_expr)
 
-    def parse_expr(self) -> ast.Expr:
+    def _parse_ws_elem(self) -> ast.WSElemExpr:
         match self._lexer.curr():
-            case ast.LParen:
+            case ast.LCurly():
+                return self._parse_curly_list()
+            case ast.LParen():
                 return self._parse_list_expr()
-            case ast.LCurly:
-                return self._parse_curly_expr()
-            case _:
-                return self._parse_space_expr()
-
-    def _parse_list_expr_elem(self) -> ast.ListExprElem:
-        match type(token := self._lexer.curr()):
-            case ast.LParen:
-                return self._parse_list_expr()
-            case ast.Atom:
+            case token if isinstance(token, ast.Atom):
                 self._lexer.next()
-                return cast(ast.Atom, token)
+                return token
             case _:
                 raise ast.ParseError(
                     token.filename,
                     token.lineno,
                     token.charno,
-                    f"Expected list or atom, got {type(token).__qualname__}",
+                    f"Expected paren list, curly listy, or atom, got {type(token).__qualname__}",
                 )
 
-    def _parse_list_expr(self) -> ast.ListExpr:
-        lparen = cast(ast.LParen, self._lexer.next())
+    def _parse_paren_list_elem(self) -> ast.ParenListExpr:
+        match self._lexer.curr():
+            case ast.LParen:
+                return self._parse_list_expr()
+            case token if isinstance(token, ast.Atom):
+                self._lexer.next()
+                return token
+            case _:
+                raise ast.ParseError(
+                    token.filename,
+                    token.lineno,
+                    token.charno,
+                    f"Expected paren list or atom, got {type(token).__qualname__}",
+                )
 
-        exprs: list[ast.ListExprElem] = []
+    def _parse_list_expr(self) -> ast.ParenList:
+        lparen = cast(ast.LParen, self._lexer.curr())
+        self._lexer.next()
+
+        exprs: list[ast.ParenListExpr] = []
         while True:
-            match type(self._lexer.curr()):
-                case ast.RParen:
-                    rparen = cast(ast.RParen, self._lexer.next())
-                    return ast.ListExpr(lparen, exprs, rparen)
+            match self._lexer.curr():
+                case ast.RParen() as rparen:
+                    self._lexer.next()
+                    return ast.ParenList(lparen, exprs, rparen)
                 case _:
-                    expr = self._parse_list_expr_elem()
+                    expr = self._parse_paren_list_elem()
                     exprs.append(expr)
 
-    def _parse_curly_expr(self) -> ast.CurlyExpr:
-        lcurly = cast(ast.LCurly, self._lexer.next())
+    def _parse_curly_list(self) -> ast.CurlyList:
+        lcurly = cast(ast.LCurly, self._lexer.curr())
+        self._lexer.next()
 
-        exprs: list[ast.Expr] = []
+        exprs: list[ast.WSExpr] = []
         while True:
-            match type(self._lexer.curr()):
-                case ast.RCurly:
-                    rcurly = cast(ast.RCurly, self._lexer.next())
-                    return ast.CurlyExpr(lcurly, exprs, rcurly)
+            match self._lexer.curr():
+                case ast.RCurly() as rcurly:
+                    self._lexer.next()
+                    return ast.CurlyList(lcurly, exprs, rcurly)
                 case _:
-                    expr = self._parse_list_expr_elem()
-                    exprs.append(expr)
-
-    def _parse_space_expr(self) -> ast.SpaceLineExpr | ast.SpaceBlockExpr:
-        exprs: list[ast.Expr] = []
-        while True:
-            match type(self._lexer.curr()):
-                case ast.Nodent:
-                    newline = cast(ast.Nodent, self._lexer.next())
-                    return ast.SpaceLineExpr(exprs, newline)
-                case ast.Indent:
-                    leading_exprs = exprs
-                    indent = cast(ast.Indent, self._lexer.next())
-                    block_exprs: list[ast.Expr] = []
-                    while True:
-                        match type(self._lexer.curr()):
-                            case ast.Dedent:
-                                dedent = cast(ast.Dedent, self._lexer.next())
-                                return ast.SpaceBlockExpr(
-                                    leading_exprs, indent, block_exprs, dedent
-                                )
-                            case _:
-                                expr = self.parse_expr()
-                                block_exprs.append(expr)
-                case _:
-                    expr = self.parse_expr()
+                    expr = self._parse_ws_expr()
                     exprs.append(expr)
 
 

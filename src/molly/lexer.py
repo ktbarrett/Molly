@@ -69,6 +69,8 @@ class Lexer:
                     self._ignore_comment()
                     continue
                 case "\n":
+                    # Always emit a Newline when significant
+                    self._emit_here(ast.Newline)
                     self._src.next()
 
                     # Inside parens newlines are just whitespace
@@ -95,9 +97,7 @@ class Lexer:
 
                     # Determine INDENT, DEDENT, NODENT.
                     curr_indentation_scope = self._indentation[-1]
-                    if self._src.charno == curr_indentation_scope[-1]:
-                        return self._emit_here(ast.Nodent)
-                    elif self._src.charno > curr_indentation_scope[-1]:
+                    if self._src.charno > curr_indentation_scope[-1]:
                         curr_indentation_scope.append(self._src.charno)
                         return self._emit_here(ast.Indent)
                     else:

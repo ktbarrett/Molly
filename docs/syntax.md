@@ -177,9 +177,9 @@ This allows users to split each element of a list onto different lines without r
 ```
 non_ws_expr = block | paren_expr | atom
 ws_expr = ws_line_list | ws_block_list | ws_line_expr
-ws_line_expr = non_ws_expr nodent
-ws_line_list = non_ws_expr non_ws_expr+ nodent
-ws_block_list = non_ws_expr+ indent ws_expr+ dedent
+ws_line_expr = non_ws_expr newline
+ws_line_list = non_ws_expr non_ws_expr+ newline
+ws_block_list = non_ws_expr+ newline indent ws_expr+ dedent
 ```
 
 ## Curly Bracket Lists

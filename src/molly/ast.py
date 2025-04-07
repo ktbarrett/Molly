@@ -48,7 +48,7 @@ class RCurly(Token): ...
 
 
 @dataclass
-class Nodent(Token): ...
+class Newline(Token): ...
 
 
 @dataclass
@@ -79,42 +79,51 @@ Atom: TypeAlias = Name | Integer | Float | String | TrueToken | FalseToken | Nul
 
 
 @dataclass
-class ListExpr:
+class ParenList:
     lparen: LParen
-    exprs: list[ListExprElem]
+    exprs: list[ParenListExpr]
     rparen: RParen
 
 
-ListExprElem: TypeAlias = ListExpr | Atom
+ParenListExpr: TypeAlias = ParenList | Atom
 
 
 @dataclass
-class SpaceLineExpr:
-    exprs: list[Expr]
-    newline: Nodent
+class WSSingle:
+    expr: WSElemExpr
+    newline: Newline
 
 
 @dataclass
-class SpaceBlockExpr:
-    leading_exprs: list[Expr]
+class WSList:
+    exprs: list[WSElemExpr]
+    newline: Newline
+
+
+@dataclass
+class WSBlock:
+    leading_exprs: list[WSElemExpr]
+    newline: Newline
     indent: Indent
-    block_exprs: list[Expr]
+    block_exprs: list[WSExpr]
     dedent: Dedent
 
 
 @dataclass
-class CurlyExpr:
+class CurlyList:
     lcurly: LCurly
-    exprs: list[Expr]
+    exprs: list[WSExpr]
     rcurly: RCurly
 
 
-Expr: TypeAlias = ListExpr | SpaceLineExpr | SpaceBlockExpr | CurlyExpr | Atom
+WSElemExpr: TypeAlias = CurlyList | ParenListExpr
+
+WSExpr: TypeAlias = WSList | WSSingle | WSBlock
 
 
 @dataclass
 class Program:
-    exprs: list[Expr]
+    exprs: list[WSExpr]
 
 
 @dataclass(repr=False)
