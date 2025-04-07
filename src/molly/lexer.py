@@ -86,9 +86,7 @@ class Lexer:
                     if self._src.curr() == "}":
                         if len(self._indentation) == 1:
                             raise ast.ParseError(
-                                self._src.name,
-                                self._src.lineno,
-                                self._src.charno,
+                                self._src.context,
                                 "Unmatched '}'",
                             )
                         self._indentation.pop()
@@ -113,9 +111,7 @@ class Lexer:
                     self._paren_depth -= 1
                     if self._paren_depth < 0:
                         raise ast.ParseError(
-                            self._src.name,
-                            self._src.lineno,
-                            self._src.charno,
+                            self._src.context,
                             "Unmatched ')'",
                         )
                     self._emit_here(ast.RParen)
@@ -128,9 +124,7 @@ class Lexer:
                 case "}":
                     if len(self._indentation) == 1:
                         raise ast.ParseError(
-                            self._src.name,
-                            self._src.lineno,
-                            self._src.charno,
+                            self._src.context,
                             "Unmatched '}'",
                         )
                     self._indentation.pop()
@@ -145,16 +139,12 @@ class Lexer:
                 case "\0":
                     if self._paren_depth:
                         raise ast.ParseError(
-                            self._src.name,
-                            self._src.lineno,
-                            self._src.charno,
+                            self._src.context,
                             "Unterminated '( )' list",
                         )
                     if len(self._indentation) > 1:
                         raise ast.ParseError(
-                            self._src.name,
-                            self._src.lineno,
-                            self._src.charno,
+                            self._src.context,
                             "Unterminated '{ }' list",
                         )
                     # emit any remaining Dedents and EOF
@@ -167,16 +157,12 @@ class Lexer:
                     return
                 case ".":
                     raise ast.ParseError(
-                        self._src.name,
-                        self._src.lineno,
-                        self._src.charno,
+                        self._src.context,
                         "Names can't start with '.' and Numbers must start with '-' or a digit.",
                     )
                 case c:
                     raise ast.ParseError(
-                        self._src.name,
-                        self._src.lineno,
-                        self._src.charno,
+                        self._src.context,
                         f"Source contained non-printable character: '{c}'",
                     )
 
@@ -203,7 +189,7 @@ class Lexer:
         self._lookahead.append(token)
 
     def _emit_here(self, token_cls: type[ast.Token]) -> None:
-        token = token_cls(self._src.name, self._src.lineno, self._src.charno)
+        token = token_cls(self._src.context)
         self._emit(token)
 
     def _lex_number(self) -> None:
@@ -218,9 +204,7 @@ class Lexer:
         # at least 1 number
         if (c := self._src.curr()) not in _numbers:
             raise ast.ParseError(
-                self._src.name,
-                self._src.lineno,
-                start_charno,
+                self._src.context,
                 "Invalid number literal. At least one number required in integer part.",
             )
         capture.append(c)
@@ -242,9 +226,7 @@ class Lexer:
             # at least 1 number
             if (c := self._src.curr()) not in _numbers:
                 raise ast.ParseError(
-                    self._src.name,
-                    self._src.lineno,
-                    start_charno,
+                    self._src.context,
                     "Invalid number literal. At least one number required in fractional part.",
                 )
             capture.append(c)
@@ -269,9 +251,7 @@ class Lexer:
             # at least 1 number
             if (c := self._src.curr()) not in _numbers:
                 raise ast.ParseError(
-                    self._src.name,
-                    self._src.lineno,
-                    start_charno,
+                    self._src.context,
                     "Invalid number literal. At least one number required in fractional part.",
                 )
             capture.append(c)
@@ -283,12 +263,12 @@ class Lexer:
                 self._src.next()
 
         value = literal_eval("".join(capture))
+        context = self._src.context
+        context.charno = start_charno
         if is_float:
-            self._emit(ast.Float(self._src.name, self._src.lineno, start_charno, value))
+            self._emit(ast.Float(context, value))
         else:
-            self._emit(
-                ast.Integer(self._src.name, self._src.lineno, start_charno, value)
-            )
+            self._emit(ast.Integer(context, value))
 
     def _lex_string(self) -> None:
         start_charno = self._src.charno
@@ -299,11 +279,9 @@ class Lexer:
                 case '"':
                     self._src.next()
                     value = "".join(capture)
-                    return self._emit(
-                        ast.String(
-                            self._src.name, self._src.lineno, start_charno, value
-                        )
-                    )
+                    context = self._src.context
+                    context.charno = start_charno
+                    return self._emit(ast.String(context, value))
                 case "\\":
                     escape_start_charno = self._src.charno
                     self._src.next()
@@ -323,10 +301,10 @@ class Lexer:
                             escape_capture: list[str] = []
                             for _ in range(2):
                                 if (c := self._src.curr()) not in _hexchars:
+                                    context = self._src.context
+                                    context.charno = escape_start_charno
                                     raise ast.ParseError(
-                                        self._src.name,
-                                        self._src.lineno,
-                                        escape_start_charno,
+                                        context,
                                         "Invalid escape sequence",
                                     )
                                 escape_capture.append(c)
@@ -334,27 +312,27 @@ class Lexer:
                             escape_value = chr(int("".join(escape_capture), 16))
                             capture.append(escape_value)
                         case c:
+                            context = self._src.context
+                            context.charno = escape_start_charno
                             raise ast.ParseError(
-                                self._src.name,
-                                self._src.lineno,
-                                escape_start_charno,
+                                context,
                                 "Invalid escape sequence",
                             )
                 case c if c.isprintable():
                     capture.append(c)
                     self._src.next()
                 case "\0" | "\n":
+                    context = self._src.context
+                    context.charno = start_charno
                     raise ast.ParseError(
-                        self._src.name,
-                        self._src.lineno,
-                        start_charno,
+                        context,
                         "Unterminated string literal",
                     )
                 case _:
+                    context = self._src.context
+                    context.charno = start_charno
                     raise ast.ParseError(
-                        self._src.name,
-                        self._src.lineno,
-                        self._src.charno,
+                        context,
                         f"String contains non-printable character: '{c}'",
                     )
 
@@ -365,21 +343,22 @@ class Lexer:
             capture.append(c)
             self._src.next()
         value = "".join(capture)
+        token_type: type[ast.Token]
         match value:
             case "null":
-                self._emit(ast.Null(self._src.name, self._src.lineno, start_charno))
+                token_type = ast.Null
             case "true":
-                self._emit(
-                    ast.TrueToken(self._src.name, self._src.lineno, start_charno)
-                )
+                token_type = ast.TrueToken
             case "false":
-                self._emit(
-                    ast.FalseToken(self._src.name, self._src.lineno, start_charno)
-                )
+                token_type = ast.FalseToken
             case _:
-                self._emit(
-                    ast.Name(self._src.name, self._src.lineno, start_charno, value)
-                )
+                context = self._src.context
+                context.charno = start_charno
+                self._emit(ast.Name(context, value))
+                return
+        context = self._src.context
+        context.charno = start_charno
+        self._emit(token_type(context))
 
 
 if __name__ == "__main__":

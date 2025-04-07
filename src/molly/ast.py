@@ -3,12 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypeAlias
 
+from molly.source import Context
+
 
 @dataclass
 class Token:
-    filename: str
-    lineno: int
-    charno: int
+    context: Context
 
 
 @dataclass
@@ -128,10 +128,8 @@ class Program:
 
 @dataclass(repr=False)
 class ParseError(Exception):
-    filename: str
-    lineno: int
-    charno: int
+    context: Context
     message: str
 
     def __repr__(self) -> str:
-        return f"{self.filename}:{self.lineno}:{self.charno}: {type(self).__qualname__}: {self.message}"
+        return f"{self.context.name}:{self.context.lineno}:{self.context.charno}: {type(self).__qualname__}: {self.message}"

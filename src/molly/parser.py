@@ -64,9 +64,7 @@ class Parser:
                 return token
             case _:
                 raise ast.ParseError(
-                    token.filename,
-                    token.lineno,
-                    token.charno,
+                    token.context,
                     f"Expected paren list, curly listy, or atom, got {type(token).__qualname__}",
                 )
 
@@ -79,9 +77,7 @@ class Parser:
                 return token
             case _:
                 raise ast.ParseError(
-                    token.filename,
-                    token.lineno,
-                    token.charno,
+                    token.context,
                     f"Expected paren list or atom, got {type(token).__qualname__}",
                 )
 

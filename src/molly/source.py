@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TextIO
+
+
+@dataclass
+class Context:
+    name: str
+    lineno: int
+    charno: int
 
 
 class SourceIterator(ABC):
@@ -21,6 +29,14 @@ class SourceIterator(ABC):
     @abstractmethod
     def charno(self) -> int:
         """The index into the line of the current character in the source object. Starts at 1."""
+
+    @property
+    def context(self) -> Context:
+        return Context(
+            self.name,
+            self.lineno,
+            self.charno,
+        )
 
     @abstractmethod
     def curr(self) -> str:
