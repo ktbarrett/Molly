@@ -96,3 +96,24 @@ class Parser:
                 case _:
                     expr = self.parse_expr()
                     exprs.append(expr)
+
+
+if __name__ == "__main__":
+    import sys
+
+    from molly.source import TextIOSourceIterator
+
+    if len(sys.argv) == 1:
+        file = sys.stdin
+        name = "<stdin>"
+    elif len(sys.argv) == 2:
+        file = open(sys.argv[1])
+        name = sys.argv[1]
+    else:
+        raise ValueError("Too many arguments")
+
+    source = TextIOSourceIterator(name, file)
+    lexer = Lexer(source)
+    parser = Parser(lexer)
+
+    print(parser.parse_program())
