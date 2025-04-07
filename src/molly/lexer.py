@@ -5,7 +5,7 @@ from collections import deque
 from enum import Enum, auto
 
 import molly.ast as ast
-from molly.source import SourceIterator, _TextIOSourceIterator
+from molly.source import SourceIterator
 
 
 def str_range(start: str, end: str) -> set[str]:
@@ -385,6 +385,8 @@ class Lexer:
 if __name__ == "__main__":
     import sys
 
+    from molly.source import TextIOSourceIterator
+
     if len(sys.argv) == 1:
         file = sys.stdin
         name = "<stdin>"
@@ -394,7 +396,8 @@ if __name__ == "__main__":
     else:
         raise ValueError("Too many arguments")
 
-    lexer = Lexer(_TextIOSourceIterator(name, file))
+    source = TextIOSourceIterator(name, file)
+    lexer = Lexer(source)
 
     while type(token := lexer.curr()) is not ast.EOF:
         print(token)

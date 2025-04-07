@@ -31,7 +31,7 @@ class SourceIterator(ABC):
         """Moves to the next character in the source object."""
 
 
-class _TextIOSourceIterator(SourceIterator):
+class TextIOSourceIterator(SourceIterator):
     def __init__(self, filename: str, io: TextIO) -> None:
         self._filename = filename
         self._io = io
